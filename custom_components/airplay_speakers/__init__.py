@@ -75,7 +75,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = AirplaySpeakerCoordinator(
         hass, entry, manager, apple_tv_bridge=apple_tv_bridge
     )
-    await coordinator.async_config_entry_first_refresh()
+
+    # Don't block setup if the first poll fails (e.g. binary can't execute).
+    # The entity will show as unavailable and the coordinator retries every 30s.
+    await coordinator.async_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
