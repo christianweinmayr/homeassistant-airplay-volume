@@ -43,10 +43,10 @@ class CLIAirplayAuthenticationError(Exception):
     """Raised when pairing fails or credentials are expired."""
 
 
-def _get_binary_path() -> Path:
-    """Detect the current platform and return the path to the cliairplay binary.
+def _get_platform_suffix() -> str:
+    """Return the platform suffix for the current system.
 
-    Raises BinaryNotFoundError if the platform is unsupported or binary is missing.
+    Raises BinaryNotFoundError if the platform is unsupported.
     """
     system = platform.system()
     machine = platform.machine()
@@ -57,6 +57,15 @@ def _get_binary_path() -> Path:
             f"Unsupported platform: {system} {machine}. "
             f"Supported: {', '.join(f'{s}-{m}' for (s, m) in _PLATFORM_MAP)}"
         )
+    return platform_suffix
+
+
+def _get_binary_path() -> Path:
+    """Detect the current platform and return the path to the cliairplay binary.
+
+    Raises BinaryNotFoundError if the platform is unsupported or binary is missing.
+    """
+    platform_suffix = _get_platform_suffix()
 
     bin_dir = Path(__file__).parent / "bin"
     binary_path = bin_dir / f"cliairplay-{platform_suffix}"
@@ -68,6 +77,19 @@ def _get_binary_path() -> Path:
         )
 
     return binary_path
+
+
+def _get_lib_dir() -> Path | None:
+    """Return the path to bundled shared libraries for the current platform.
+
+    Returns None if no bundled libraries directory exists (e.g. on macOS).
+    """
+    platform_suffix = _get_platform_suffix()
+    lib_dir = Path(__file__).parent / "lib" / platform_suffix
+
+    if lib_dir.is_dir():
+        return lib_dir
+    return None
 
 
 class CLIAirplayManager:
@@ -97,6 +119,7 @@ class CLIAirplayManager:
         self.credentials = credentials
 
         self._binary_path: Path | None = None
+        self._lib_dir: Path | None = None
         self._stopping: bool = False
 
     async def start(self) -> None:
@@ -118,11 +141,15 @@ class CLIAirplayManager:
             await self.hass.async_add_executor_job(
                 os.chmod, self._binary_path, 0o755
             )
+            self._lib_dir = await self.hass.async_add_executor_job(
+                _get_lib_dir
+            )
 
         _LOGGER.info(
-            "cliairplay binary validated for %s: %s",
+            "cliairplay binary validated for %s: %s (lib_dir=%s)",
             self.device_id,
             self._binary_path,
+            self._lib_dir,
         )
 
     async def stop(self) -> None:
@@ -246,6 +273,9 @@ class CLIAirplayManager:
             self._binary_path = await self.hass.async_add_executor_job(
                 _get_binary_path
             )
+            self._lib_dir = await self.hass.async_add_executor_job(
+                _get_lib_dir
+            )
 
         cmd = [
             str(self._binary_path),
@@ -258,6 +288,16 @@ class CLIAirplayManager:
             cmd.extend(["--credentials", self.credentials])
         cmd.extend(args)
 
+        # Build subprocess environment with bundled library path
+        env: dict[str, str] | None = None
+        if self._lib_dir is not None:
+            env = os.environ.copy()
+            existing = env.get("LD_LIBRARY_PATH", "")
+            lib_path = str(self._lib_dir)
+            env["LD_LIBRARY_PATH"] = (
+                f"{lib_path}:{existing}" if existing else lib_path
+            )
+
         _LOGGER.debug(
             "Running cliairplay command for %s: %s",
             self.device_id,
@@ -269,6 +309,7 @@ class CLIAirplayManager:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
