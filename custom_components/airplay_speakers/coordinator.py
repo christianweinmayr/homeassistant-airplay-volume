@@ -1,9 +1,11 @@
-"""DataUpdateCoordinator for polling AirPlay speaker state."""
+"""DataUpdateCoordinator for polling AirPlay speaker state via Apple TV."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
+
+from pyatv.interface import AppleTV, OutputDevice
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -13,14 +15,9 @@ from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-try:
-    from pyatv.interface import AppleTV
-except ImportError:
-    AppleTV = None  # type: ignore[assignment, misc]
-
 
 class AirplaySpeakerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Coordinator that polls an AirPlay speaker for volume state via pyatv."""
+    """Coordinator that polls Apple TV for output device state."""
 
     config_entry: ConfigEntry
 
@@ -41,14 +38,34 @@ class AirplaySpeakerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.atv = atv
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Poll the speaker for current state."""
+        """Poll Apple TV for output devices and playback state."""
         try:
-            volume = self.atv.audio.volume
+            output_devices: list[OutputDevice] = self.atv.audio.output_devices
         except Exception as err:
-            raise UpdateFailed(
-                f"Failed to get volume for {self.config_entry.title}: {err}"
-            ) from err
+            raise UpdateFailed(f"Failed to get output devices: {err}") from err
+
+        try:
+            playing = await self.atv.metadata.playing()
+            device_state = str(playing.device_state)
+            title = playing.title
+            artist = playing.artist
+        except Exception:
+            device_state = None
+            title = None
+            artist = None
+
+        devices = {}
+        for dev in output_devices:
+            devices[dev.identifier] = {
+                "name": dev.name,
+                "volume": dev.volume,
+                "identifier": dev.identifier,
+                "output_device": dev,
+            }
 
         return {
-            "volume": volume / 100.0 if volume is not None else None,
+            "devices": devices,
+            "device_state": device_state,
+            "title": title,
+            "artist": artist,
         }

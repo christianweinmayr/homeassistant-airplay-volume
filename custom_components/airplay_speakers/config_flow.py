@@ -2,51 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
+import pyatv
+from pyatv.const import Protocol
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 
 from .const import (
-    CONF_CREDENTIALS,
-    CONF_DEVICE_ID,
-    CONF_MODEL,
+    CONF_AIRPLAY_CREDENTIALS,
+    CONF_ATV_HOST,
+    CONF_ATV_NAME,
+    CONF_COMPANION_CREDENTIALS,
     DOMAIN,
-    TXT_DEVICE_ID,
-    TXT_FEATURES,
-    TXT_MODEL,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# Apple TV integration domain for coexistence check
-APPLE_TV_DOMAIN = "apple_tv"
-
-# AirPlay 2 feature bit (bit 38) — indicates HAP pairing support
-_AIRPLAY2_FEATURE_BIT = 1 << 38
-
-
-def _is_airplay2(features_str: str | None) -> bool:
-    """Determine if a device supports AirPlay 2 based on its feature bitmask."""
-    if not features_str:
-        return False
-    try:
-        # Features field can be a hex string like "0x..." or a plain integer
-        features = int(features_str, 0)
-    except (ValueError, TypeError):
-        return False
-    return bool(features & _AIRPLAY2_FEATURE_BIT)
-
-
-def _normalize_device_id(device_id: str) -> str:
-    """Normalize a device ID (MAC address) to a consistent format.
-
-    Strips whitespace, lowercases, and ensures colon separators.
-    """
-    return device_id.strip().upper()
 
 
 class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -56,116 +31,139 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._discovery_info: dict[str, Any] = {}
+        self._host: str = ""
+        self._atv_name: str = ""
+        self._atv_config = None
+        self._companion_creds: str | None = None
+        self._pairing = None
 
-    async def async_step_zeroconf(
-        self, discovery_info: ZeroconfServiceInfo
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle zeroconf discovery of an AirPlay speaker."""
-        properties = discovery_info.properties
+        """Handle the initial step: user enters Apple TV IP."""
+        errors: dict[str, str] = {}
 
-        # Extract device identifiers from mDNS TXT records
-        device_id_raw = properties.get(TXT_DEVICE_ID, "")
-        if not device_id_raw:
-            return self.async_abort(reason="no_devices_found")
+        if user_input is not None:
+            self._host = user_input[CONF_ATV_HOST]
 
-        device_id = _normalize_device_id(device_id_raw)
-        name = discovery_info.name.split("._")[0]  # Strip service type suffix
-        model = properties.get(TXT_MODEL, "AirPlay Speaker")
-        features = properties.get(TXT_FEATURES)
-        host = str(discovery_info.host)
-        port = discovery_info.port or 7000
+            loop = asyncio.get_running_loop()
+            try:
+                configs = await pyatv.scan(loop, hosts=[self._host], timeout=5)
+            except Exception:
+                errors["base"] = "cannot_connect"
+            else:
+                if not configs:
+                    errors["base"] = "cannot_connect"
+                else:
+                    self._atv_config = configs[0]
+                    self._atv_name = self._atv_config.name
 
-        _LOGGER.debug(
-            "Discovered AirPlay device: name=%s, deviceid=%s, model=%s, host=%s:%s",
-            name,
-            device_id,
-            model,
-            host,
-            port,
-        )
+                    # Check if already configured for this Apple TV
+                    await self.async_set_unique_id(f"atv_{self._host}")
+                    self._abort_if_unique_id_configured()
 
-        # Set unique ID and abort if already configured (update host/port on IP change)
-        await self.async_set_unique_id(device_id)
-        self._abort_if_unique_id_configured(
-            updates={CONF_HOST: host, CONF_PORT: port}
-        )
-
-        # Check if device is already managed by the Apple TV integration
-        for entry in self.hass.config_entries.async_entries(APPLE_TV_DOMAIN):
-            if entry.unique_id and entry.unique_id.upper() == device_id:
-                _LOGGER.debug(
-                    "Device %s already managed by Apple TV integration, skipping",
-                    device_id,
-                )
-                return self.async_abort(reason="already_configured")
-
-        # Store discovery data for subsequent steps
-        self._discovery_info = {
-            CONF_HOST: host,
-            CONF_PORT: port,
-            CONF_DEVICE_ID: device_id,
-            CONF_NAME: name,
-            CONF_MODEL: model,
-            "is_airplay2": _is_airplay2(features),
-        }
-
-        # Set flow title context for the UI
-        self.context["title_placeholders"] = {"name": name}
+                    return await self.async_step_pair_companion()
 
         return self.async_show_form(
-            step_id="zeroconf_confirm",
-            description_placeholders={"name": name, "model": model},
+            step_id="user",
+            data_schema=vol.Schema({
+                vol.Required(CONF_ATV_HOST): str,
+            }),
+            errors=errors,
         )
 
-    async def async_step_zeroconf_confirm(
+    async def async_step_pair_companion(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle user confirmation of discovered device."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="zeroconf_confirm",
-                description_placeholders={
-                    "name": self._discovery_info[CONF_NAME],
-                    "model": self._discovery_info[CONF_MODEL],
-                },
-            )
+        """Pair with Apple TV via Companion protocol."""
+        errors: dict[str, str] = {}
 
-        # User confirmed — check if pairing is needed
-        if self._discovery_info.get("is_airplay2"):
-            return await self.async_step_pair()
+        if user_input is not None:
+            pin = user_input["pin"]
+            try:
+                self._pairing.pin(int(pin))
+                await self._pairing.finish()
+                self._companion_creds = self._pairing.service.credentials
+                await self._pairing.close()
+                self._pairing = None
+            except Exception:
+                _LOGGER.exception("Companion pairing failed")
+                errors["base"] = "pairing_failed"
+                if self._pairing:
+                    await self._pairing.close()
+                    self._pairing = None
+            else:
+                return await self.async_step_pair_airplay()
 
-        # AirPlay 1 device — no pairing needed, create entry directly
-        return self.async_create_entry(
-            title=self._discovery_info[CONF_NAME],
-            data={
-                CONF_HOST: self._discovery_info[CONF_HOST],
-                CONF_PORT: self._discovery_info[CONF_PORT],
-                CONF_DEVICE_ID: self._discovery_info[CONF_DEVICE_ID],
-                CONF_NAME: self._discovery_info[CONF_NAME],
-                CONF_MODEL: self._discovery_info[CONF_MODEL],
-                CONF_CREDENTIALS: None,
-            },
+        # Start Companion pairing
+        if self._pairing is None:
+            loop = asyncio.get_running_loop()
+            try:
+                self._pairing = await pyatv.pair(
+                    self._atv_config, Protocol.Companion, loop
+                )
+                await self._pairing.begin()
+            except Exception:
+                _LOGGER.exception("Failed to start Companion pairing")
+                return self.async_abort(reason="pairing_failed")
+
+        return self.async_show_form(
+            step_id="pair_companion",
+            data_schema=vol.Schema({
+                vol.Required("pin"): str,
+            }),
+            description_placeholders={"name": self._atv_name},
+            errors=errors,
         )
 
-    async def async_step_pair(
+    async def async_step_pair_airplay(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle AirPlay 2 device setup.
+        """Pair with Apple TV via AirPlay protocol."""
+        errors: dict[str, str] = {}
 
-        pyatv handles authentication internally during connection.
-        For now, create the entry without explicit HAP pairing credentials.
-        """
-        # AirPlay 2 device — create entry without explicit credentials.
-        # pyatv negotiates authentication during connection if needed.
-        return self.async_create_entry(
-            title=self._discovery_info[CONF_NAME],
-            data={
-                CONF_HOST: self._discovery_info[CONF_HOST],
-                CONF_PORT: self._discovery_info[CONF_PORT],
-                CONF_DEVICE_ID: self._discovery_info[CONF_DEVICE_ID],
-                CONF_NAME: self._discovery_info[CONF_NAME],
-                CONF_MODEL: self._discovery_info[CONF_MODEL],
-                CONF_CREDENTIALS: None,
-            },
+        if user_input is not None:
+            pin = user_input["pin"]
+            try:
+                self._pairing.pin(int(pin))
+                await self._pairing.finish()
+                airplay_creds = self._pairing.service.credentials
+                await self._pairing.close()
+                self._pairing = None
+            except Exception:
+                _LOGGER.exception("AirPlay pairing failed")
+                errors["base"] = "pairing_failed"
+                if self._pairing:
+                    await self._pairing.close()
+                    self._pairing = None
+            else:
+                return self.async_create_entry(
+                    title=f"AirPlay Speakers ({self._atv_name})",
+                    data={
+                        CONF_ATV_HOST: self._host,
+                        CONF_ATV_NAME: self._atv_name,
+                        CONF_COMPANION_CREDENTIALS: self._companion_creds,
+                        CONF_AIRPLAY_CREDENTIALS: airplay_creds,
+                    },
+                )
+
+        # Start AirPlay pairing
+        if self._pairing is None:
+            loop = asyncio.get_running_loop()
+            try:
+                self._pairing = await pyatv.pair(
+                    self._atv_config, Protocol.AirPlay, loop
+                )
+                await self._pairing.begin()
+            except Exception:
+                _LOGGER.exception("Failed to start AirPlay pairing")
+                return self.async_abort(reason="pairing_failed")
+
+        return self.async_show_form(
+            step_id="pair_airplay",
+            data_schema=vol.Schema({
+                vol.Required("pin"): str,
+            }),
+            description_placeholders={"name": self._atv_name},
+            errors=errors,
         )
