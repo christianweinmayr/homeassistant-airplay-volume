@@ -5,18 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 
-from .binary_manager import (
-    CLIAirplayAuthenticationError,
-    CLIAirplayConnectionError,
-    CLIAirplayManager,
-)
 from .const import (
     CONF_CREDENTIALS,
     CONF_DEVICE_ID,
@@ -158,60 +151,21 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_pair(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle PIN-based HAP pairing for AirPlay 2 devices."""
-        errors: dict[str, str] = {}
+        """Handle AirPlay 2 device setup.
 
-        if user_input is not None:
-            pin = user_input.get("pin", "").strip()
-            if not pin:
-                errors["pin"] = "invalid_pin"
-            else:
-                # Attempt pairing via cliairplay
-                manager = CLIAirplayManager(
-                    hass=self.hass,
-                    device_id=self._discovery_info[CONF_DEVICE_ID],
-                    host=self._discovery_info[CONF_HOST],
-                    port=self._discovery_info[CONF_PORT],
-                )
-                try:
-                    result = await manager.pair(pin)
-                    credentials = result.get("credentials")
-                except CLIAirplayAuthenticationError:
-                    _LOGGER.debug(
-                        "Pairing failed for %s: invalid PIN or auth error",
-                        self._discovery_info[CONF_DEVICE_ID],
-                    )
-                    errors["pin"] = "invalid_pin"
-                except CLIAirplayConnectionError:
-                    _LOGGER.debug(
-                        "Connection error during pairing for %s",
-                        self._discovery_info[CONF_DEVICE_ID],
-                    )
-                    errors["base"] = "cannot_connect"
-                except Exception:
-                    _LOGGER.exception(
-                        "Unexpected error during pairing for %s",
-                        self._discovery_info[CONF_DEVICE_ID],
-                    )
-                    errors["base"] = "unknown"
-                else:
-                    return self.async_create_entry(
-                        title=self._discovery_info[CONF_NAME],
-                        data={
-                            CONF_HOST: self._discovery_info[CONF_HOST],
-                            CONF_PORT: self._discovery_info[CONF_PORT],
-                            CONF_DEVICE_ID: self._discovery_info[CONF_DEVICE_ID],
-                            CONF_NAME: self._discovery_info[CONF_NAME],
-                            CONF_MODEL: self._discovery_info[CONF_MODEL],
-                            CONF_CREDENTIALS: credentials,
-                        },
-                    )
-
-        return self.async_show_form(
-            step_id="pair",
-            data_schema=vol.Schema({vol.Required("pin"): str}),
-            description_placeholders={
-                "name": self._discovery_info[CONF_NAME],
+        pyatv handles authentication internally during connection.
+        For now, create the entry without explicit HAP pairing credentials.
+        """
+        # AirPlay 2 device — create entry without explicit credentials.
+        # pyatv negotiates authentication during connection if needed.
+        return self.async_create_entry(
+            title=self._discovery_info[CONF_NAME],
+            data={
+                CONF_HOST: self._discovery_info[CONF_HOST],
+                CONF_PORT: self._discovery_info[CONF_PORT],
+                CONF_DEVICE_ID: self._discovery_info[CONF_DEVICE_ID],
+                CONF_NAME: self._discovery_info[CONF_NAME],
+                CONF_MODEL: self._discovery_info[CONF_MODEL],
+                CONF_CREDENTIALS: None,
             },
-            errors=errors,
         )
