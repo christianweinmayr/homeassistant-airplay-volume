@@ -2,7 +2,7 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue.svg)](https://www.home-assistant.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](LICENSE)
 
 Control the volume of your AirPlay speakers from Home Assistant -- with a slider directly on the dashboard.
 
@@ -109,4 +109,4 @@ custom_components/airplay_speakers/
 
 ## License
 
-MIT -- see [LICENSE](LICENSE).
+CC BY-NC 4.0 -- see [LICENSE](LICENSE). Free for personal and non-commercial use.
