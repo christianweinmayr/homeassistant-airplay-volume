@@ -20,6 +20,7 @@ _PLATFORM_MAP: dict[tuple[str, str], str] = {
     ("Linux", "x86_64"): "linux-x86_64",
     ("Linux", "aarch64"): "linux-aarch64",
     ("Darwin", "arm64"): "darwin-arm64",
+    ("Darwin", "x86_64"): "darwin-x86_64",
 }
 
 # Process management constants
