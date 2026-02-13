@@ -4,52 +4,42 @@
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Control your AirPlay speakers directly from Home Assistant. Discover speakers automatically, adjust volume, send TTS announcements, and -- with an Apple TV on the network -- get full playback control.
+Control the volume of your AirPlay speakers from Home Assistant -- with a slider directly on the dashboard.
 
 ---
 
 ## What This Does
 
-This custom integration discovers AirPlay 1 and AirPlay 2 speakers on your local network and exposes them as `media_player` entities. You get volume control and TTS out of the box. If an Apple TV is present, you also get play/pause/skip and multi-room speaker grouping.
+This custom integration connects to your Apple TV and discovers the AirPlay speakers in its output group. Each speaker gets a volume slider (shown directly on the default dashboard) and a media player entity displaying the current playback state, title, and artist.
 
-### Capabilities
+### Features
 
-| Feature | Without Apple TV | With Apple TV |
-|---|:---:|:---:|
-| Auto-discovery via mDNS | :white_check_mark: | :white_check_mark: |
-| Volume set / step up / step down | :white_check_mark: | :white_check_mark: |
-| Mute / unmute | :white_check_mark: | :white_check_mark: |
-| TTS announcements | :white_check_mark: | :white_check_mark: |
-| Play / pause / stop | :x: | :white_check_mark: |
-| Next / previous track | :x: | :white_check_mark: |
-| Now playing (title, artist) | :x: | :white_check_mark: |
-| Multi-room speaker grouping | :x: | :white_check_mark: |
+- Auto-detect Apple TVs on the network (no manual IP entry)
+- DHCP-resilient: reconnects by device identifier, not IP address
+- Volume slider directly on the dashboard (no card configuration needed)
+- Playback state with media title and artist
+- Individual volume control per speaker in the group
 
-### Supported Devices
+### Requirements
 
-- **AirPlay 2**: HomePod, HomePod Mini, and other AirPlay 2 speakers
-- **AirPlay 1**: AirPort Express, older AirPlay receivers
-- **AirPlay-compatible**: Sound bars, AVRs, and third-party speakers with AirPlay support
+- An **Apple TV** on the same network (used as the control bridge)
+- AirPlay speakers grouped with the Apple TV
+- Home Assistant 2024.1.0+
 
 ## How It Works
 
 ```
 Home Assistant
     |
-    +-- zeroconf discovers _airplay._tcp / _raop._tcp
+    +-- pyatv: scan network for Apple TVs
     |
-    +-- cliairplay binary (based on owntone-server)
-    |       Handles: HAP pairing, FairPlay auth,
-    |       AirPlay 2 encrypted streaming, volume control
+    +-- Companion protocol: output device discovery,
+    |   volume control per speaker, playback state
     |
-    +-- pyatv (optional, when Apple TV is available)
-            Handles: MRP playback control,
-            speaker grouping, now-playing metadata
+    +-- AirPlay protocol: authentication
 ```
 
-The core audio path uses [cliairplay](https://github.com/music-assistant/cliairplay/) -- a purpose-built C binary from the Music Assistant project. Unlike pyatv, it fully supports AirPlay 2 encrypted streaming (HAP authentication, FairPlay v3, ChaCha20-Poly1305).
-
-Speakers are discovered automatically via mDNS. AirPlay 2 devices require a one-time PIN pairing step. AirPlay 1 devices work immediately.
+The integration connects to your Apple TV via the Companion and AirPlay protocols. Through the Apple TV's output devices API, it can read and set the volume of each individual AirPlay speaker in the group, and get the current playback state with media metadata.
 
 ## Installation
 
@@ -67,65 +57,55 @@ Speakers are discovered automatically via mDNS. AirPlay 2 devices require a one-
 
 ## Setup
 
-After installation, speakers are discovered automatically. You'll see a notification for each new speaker:
+1. Go to **Settings** > **Devices & Services** > **Add Integration** > **AirPlay Speakers**
+2. The integration scans your network and shows discovered Apple TVs -- select yours
+3. **Step 1/2**: Enter the PIN shown on your TV (Companion protocol pairing)
+4. **Step 2/2**: Enter the new PIN shown on your TV (AirPlay protocol pairing)
 
-1. **AirPlay 1 devices** -- confirm and you're done
-2. **AirPlay 2 devices** -- confirm, then enter the PIN displayed on your speaker to complete HAP pairing
+That's it. Speakers in the Apple TV's output group appear automatically as entities.
 
-Credentials are stored per-device in the config entry. No YAML configuration needed.
+### Entities Created Per Speaker
 
-## Coexistence with Apple TV Integration
-
-This integration runs independently alongside the built-in Apple TV integration. During discovery, devices already managed by Apple TV are automatically filtered out -- no duplicate entities.
+| Entity | Type | Purpose |
+|---|---|---|
+| `number.<speaker>_volume` | Number (slider) | Volume control, shown directly on dashboard |
+| `media_player.<speaker>` | Media Player | Playback state, title, artist |
 
 ## Architecture
 
 ```
 custom_components/airplay_speakers/
-  __init__.py          # Entry point, lifecycle management
-  config_flow.py       # Zeroconf discovery + HAP pairing
+  __init__.py          # Entry point, Apple TV connection
+  config_flow.py       # Network scan + two-step pairing
   const.py             # Domain constants
-  media_player.py      # MediaPlayerEntity (speaker device class)
-  coordinator.py       # DataUpdateCoordinator (30s polling)
-  binary_manager.py    # cliairplay subprocess management
-  apple_tv.py          # Optional pyatv MRP bridge
+  number.py            # Volume slider entity (NumberEntity)
+  media_player.py      # Playback state entity (MediaPlayerEntity)
+  coordinator.py       # DataUpdateCoordinator (10s polling)
   manifest.json        # Integration metadata
   strings.json         # Config flow UI strings
   translations/en.json # English translations
-  bin/                 # Pre-compiled cliairplay binaries
 ```
 
 ## Troubleshooting
 
-### Speaker not discovered
-- Verify the speaker is on the **same subnet** as Home Assistant
+### Apple TV not found during setup
+- Verify the Apple TV is on the **same subnet** as Home Assistant
 - Ensure mDNS traffic is not blocked by your router/firewall
-- Restart the speaker and wait ~60 seconds for re-announcement
+- The Apple TV must be powered on (not in deep sleep)
 
-### AirPlay 2 pairing fails
+### Pairing fails
 - Enter the PIN promptly -- it may time out
-- Power-cycle the speaker and retry
+- If it fails, retry the setup flow
 - Check HA logs (`Logger: custom_components.airplay_speakers`) for details
 
-### Volume commands ignored
-- HomePod Mini has known issues with third-party volume control
-- Some Samsung AirPlay 2 TVs have limited third-party compatibility
-- Check if the speaker has restrictions enabled (parental controls, etc.)
+### Volume changes have no effect
+- The speaker must be in the Apple TV's active output group
+- Check that the speaker appears in `output_devices` (visible in the entity attributes)
 
-### Entity shows unavailable
-- The cliairplay process may have crashed -- check logs for auto-restart messages
+### Speaker entity shows unavailable
+- The speaker may have been removed from the Apple TV's output group
 - Verify the speaker is powered on and network-reachable
-- The integration retries up to 5 times with exponential backoff before giving up
-
-### Duplicate entities
-- This integration filters out devices managed by the built-in Apple TV integration
-- If duplicates appear, remove the device and let it be re-discovered
-
-## Requirements
-
-- Home Assistant 2024.1.0+
-- AirPlay speakers on the same local network
-- cliairplay binaries in `bin/` (bundled for linux-x86_64, linux-aarch64, darwin-arm64)
+- The coordinator retries automatically every 10 seconds
 
 ## License
 
