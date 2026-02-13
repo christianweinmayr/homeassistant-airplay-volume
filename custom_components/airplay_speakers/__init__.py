@@ -22,7 +22,7 @@ from .coordinator import AirplaySpeakerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player"]
+PLATFORMS = ["media_player", "number"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
