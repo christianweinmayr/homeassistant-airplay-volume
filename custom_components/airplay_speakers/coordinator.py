@@ -46,8 +46,8 @@ class AirplaySpeakerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER,
             name=f"{DOMAIN}_{entry.entry_id}",
             update_interval=DEFAULT_UPDATE_INTERVAL,
-            config_entry=entry,
         )
+        self.config_entry = entry
         self.manager = manager
         self.apple_tv_bridge = apple_tv_bridge
 

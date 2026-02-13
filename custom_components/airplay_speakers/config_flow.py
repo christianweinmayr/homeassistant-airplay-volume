@@ -7,7 +7,8 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow
+from homeassistant.data_entry_flow import FlowResult
 from homeassistant.components.zeroconf import ZeroconfServiceInfo
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 
@@ -66,7 +67,7 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_zeroconf(
         self, discovery_info: ZeroconfServiceInfo
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle zeroconf discovery of an AirPlay speaker."""
         properties = discovery_info.properties
 
@@ -126,7 +127,7 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_zeroconf_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle user confirmation of discovered device."""
         if user_input is None:
             return self.async_show_form(
@@ -156,7 +157,7 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_pair(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle PIN-based HAP pairing for AirPlay 2 devices."""
         errors: dict[str, str] = {}
 
