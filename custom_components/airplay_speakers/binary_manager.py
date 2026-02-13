@@ -97,24 +97,17 @@ class CLIAirplayManager:
         self.credentials = credentials
 
         self._binary_path: Path | None = None
-        self._process: asyncio.subprocess.Process | None = None
-        self._restart_count: int = 0
-        self._monitor_task: asyncio.Task[None] | None = None
         self._stopping: bool = False
 
     async def start(self) -> None:
-        """Launch the cliairplay subprocess for this device.
+        """Validate the cliairplay binary and prepare for command execution.
+
+        This does NOT launch a persistent subprocess. Commands are executed
+        per-invocation via _run_command(). This method just ensures the binary
+        is present and executable.
 
         Raises BinaryNotFoundError if the binary cannot be found.
         """
-        if self._process is not None and self._process.returncode is None:
-            _LOGGER.debug(
-                "cliairplay already running for %s (pid=%s)",
-                self.device_id,
-                self._process.pid,
-            )
-            return
-
         self._stopping = False
 
         if self._binary_path is None:
@@ -126,83 +119,20 @@ class CLIAirplayManager:
                 os.chmod, self._binary_path, 0o755
             )
 
-        cmd = [
-            str(self._binary_path),
-            "--host",
-            self.host,
-            "--port",
-            str(self.port),
-        ]
-        if self.credentials:
-            cmd.extend(["--credentials", self.credentials])
-
-        _LOGGER.debug(
-            "Starting cliairplay for %s: %s",
-            self.device_id,
-            " ".join(cmd),
-        )
-
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
         _LOGGER.info(
-            "cliairplay started for %s (pid=%s)", self.device_id, self._process.pid
-        )
-
-        self._restart_count = 0
-        self._monitor_task = asyncio.create_task(
-            self._monitor_process(), name=f"cliairplay_monitor_{self.device_id}"
+            "cliairplay binary validated for %s: %s",
+            self.device_id,
+            self._binary_path,
         )
 
     async def stop(self) -> None:
-        """Gracefully stop the cliairplay subprocess."""
+        """Mark the manager as stopped."""
         self._stopping = True
-
-        if self._monitor_task is not None:
-            self._monitor_task.cancel()
-            try:
-                await self._monitor_task
-            except asyncio.CancelledError:
-                pass
-            self._monitor_task = None
-
-        if self._process is None or self._process.returncode is not None:
-            self._process = None
-            return
-
-        pid = self._process.pid
-        _LOGGER.debug("Stopping cliairplay for %s (pid=%s)", self.device_id, pid)
-
-        try:
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=_STOP_TIMEOUT)
-                _LOGGER.debug("cliairplay (pid=%s) terminated gracefully", pid)
-            except asyncio.TimeoutError:
-                _LOGGER.warning(
-                    "cliairplay (pid=%s) did not terminate in %ss, sending SIGKILL",
-                    pid,
-                    _STOP_TIMEOUT,
-                )
-                self._process.kill()
-                await self._process.wait()
-        except ProcessLookupError:
-            _LOGGER.debug("cliairplay (pid=%s) already exited", pid)
-
-        self._process = None
-
-    async def restart(self) -> None:
-        """Stop and restart the cliairplay subprocess."""
-        await self.stop()
-        await self.start()
+        _LOGGER.debug("cliairplay manager stopped for %s", self.device_id)
 
     async def is_running(self) -> bool:
-        """Check if the cliairplay process is alive."""
-        return self._process is not None and self._process.returncode is None
+        """Check if the manager is ready to execute commands."""
+        return self._binary_path is not None and not self._stopping
 
     async def set_volume(self, volume: float) -> None:
         """Set the speaker volume.
@@ -369,80 +299,3 @@ class CLIAirplayManager:
 
         return stdout_text
 
-    async def _monitor_process(self) -> None:
-        """Monitor the long-running cliairplay process and auto-restart on crash."""
-        while not self._stopping:
-            if self._process is None:
-                return
-
-            returncode = await self._process.wait()
-
-            if self._stopping:
-                return
-
-            _LOGGER.warning(
-                "cliairplay for %s exited unexpectedly (code=%s)",
-                self.device_id,
-                returncode,
-            )
-
-            # Read any remaining stderr for diagnostics
-            if self._process.stderr:
-                try:
-                    stderr_data = await self._process.stderr.read()
-                    if stderr_data:
-                        _LOGGER.debug(
-                            "cliairplay final stderr for %s: %s",
-                            self.device_id,
-                            stderr_data.decode("utf-8", errors="replace"),
-                        )
-                except Exception:  # noqa: BLE001
-                    pass
-
-            self._process = None
-
-            if self._restart_count >= _MAX_RESTART_ATTEMPTS:
-                _LOGGER.error(
-                    "cliairplay for %s has crashed %d times, giving up auto-restart",
-                    self.device_id,
-                    self._restart_count,
-                )
-                return
-
-            backoff = min(
-                _RESTART_BACKOFF_BASE * (2 ** self._restart_count),
-                _RESTART_BACKOFF_MAX,
-            )
-            self._restart_count += 1
-
-            _LOGGER.info(
-                "Restarting cliairplay for %s in %ss (attempt %d/%d)",
-                self.device_id,
-                backoff,
-                self._restart_count,
-                _MAX_RESTART_ATTEMPTS,
-            )
-
-            try:
-                await asyncio.sleep(backoff)
-            except asyncio.CancelledError:
-                return
-
-            if self._stopping:
-                return
-
-            try:
-                await self.start()
-            except BinaryNotFoundError:
-                _LOGGER.error(
-                    "Cannot restart cliairplay for %s: binary not found",
-                    self.device_id,
-                )
-                return
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception(
-                    "Failed to restart cliairplay for %s", self.device_id
-                )
-
-            # After start() creates a new monitor task, this one should exit
-            return
