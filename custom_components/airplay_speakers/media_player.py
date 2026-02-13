@@ -7,6 +7,7 @@ import logging
 from homeassistant.components.media_player import (
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
+    MediaPlayerEntityFeature,
     MediaPlayerState,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -69,7 +70,7 @@ class AirplaySpeakerEntity(
     _attr_device_class = MediaPlayerDeviceClass.SPEAKER
     _attr_has_entity_name = True
     _attr_name = None
-    _attr_supported_features = 0
+    _attr_supported_features = MediaPlayerEntityFeature(0)
 
     def __init__(
         self,
