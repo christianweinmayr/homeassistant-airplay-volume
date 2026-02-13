@@ -1,0 +1,32 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "zeroconf_confirm": {
+        "title": "AirPlay Speaker Discovered",
+        "description": "An AirPlay speaker was discovered on your network:\n\n**{name}** ({model})",
+        "data": {},
+        "submit": "Add Device"
+      },
+      "pair": {
+        "title": "Pair with {name}",
+        "description": "Enter the PIN displayed on your AirPlay device to complete pairing.",
+        "data": {
+          "pin": "PIN Code"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "already_in_progress": "Configuration for this device is already in progress.",
+      "no_devices_found": "No AirPlay speakers found on the network.",
+      "cannot_connect": "Could not connect to the AirPlay speaker.",
+      "pairing_failed": "Pairing failed. Please try again."
+    },
+    "error": {
+      "invalid_pin": "Invalid PIN. Please check the PIN and try again.",
+      "cannot_connect": "Could not connect to the speaker.",
+      "unknown": "An unexpected error occurred."
+    }
+  }
+}
