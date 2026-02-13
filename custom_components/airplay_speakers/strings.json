@@ -2,22 +2,22 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Apple TV",
-        "description": "Enter the IP address of your Apple TV. The integration will use it to control AirPlay speakers in its group.",
+        "title": "Select Apple TV",
+        "description": "Select the Apple TV that controls your AirPlay speakers.",
         "data": {
-          "atv_host": "Apple TV IP Address"
+          "apple_tv": "Apple TV"
         }
       },
       "pair_companion": {
         "title": "Pair with {name} (Step 1/2)",
-        "description": "A PIN code should appear on your Apple TV. Enter it below to pair the Companion protocol.",
+        "description": "A PIN code should appear on your Apple TV. Enter it below.",
         "data": {
           "pin": "PIN Code"
         }
       },
       "pair_airplay": {
         "title": "Pair with {name} (Step 2/2)",
-        "description": "A new PIN code should appear on your Apple TV. Enter it below to pair the AirPlay protocol.",
+        "description": "A new PIN code should appear on your Apple TV. Enter it below.",
         "data": {
           "pin": "PIN Code"
         }
@@ -25,10 +25,12 @@
     },
     "abort": {
       "already_configured": "This Apple TV is already configured.",
+      "no_apple_tv": "No Apple TV found on the network.",
+      "cannot_connect": "Could not scan the network.",
       "pairing_failed": "Pairing failed. Please try again."
     },
     "error": {
-      "cannot_connect": "Could not find an Apple TV at this address.",
+      "cannot_connect": "Could not connect to the Apple TV.",
       "pairing_failed": "Pairing failed. Check the PIN and try again."
     }
   }

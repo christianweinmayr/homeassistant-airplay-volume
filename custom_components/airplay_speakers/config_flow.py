@@ -15,7 +15,7 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
     CONF_AIRPLAY_CREDENTIALS,
-    CONF_ATV_HOST,
+    CONF_ATV_IDENTIFIER,
     CONF_ATV_NAME,
     CONF_COMPANION_CREDENTIALS,
     DOMAIN,
@@ -31,43 +31,64 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._host: str = ""
+        self._discovered: dict[str, Any] = {}  # identifier -> config
+        self._selected_config = None
         self._atv_name: str = ""
-        self._atv_config = None
+        self._atv_identifier: str = ""
         self._companion_creds: str | None = None
         self._pairing = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step: user enters Apple TV IP."""
+        """Scan network and let user pick an Apple TV."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._host = user_input[CONF_ATV_HOST]
-
-            loop = asyncio.get_running_loop()
-            try:
-                configs = await pyatv.scan(loop, hosts=[self._host], timeout=5)
-            except Exception:
+            identifier = user_input["apple_tv"]
+            config = self._discovered.get(identifier)
+            if config is None:
                 errors["base"] = "cannot_connect"
             else:
-                if not configs:
-                    errors["base"] = "cannot_connect"
-                else:
-                    self._atv_config = configs[0]
-                    self._atv_name = self._atv_config.name
+                self._selected_config = config
+                self._atv_name = config.name
+                self._atv_identifier = identifier
 
-                    # Check if already configured for this Apple TV
-                    await self.async_set_unique_id(f"atv_{self._host}")
-                    self._abort_if_unique_id_configured()
+                await self.async_set_unique_id(identifier)
+                self._abort_if_unique_id_configured()
 
-                    return await self.async_step_pair_companion()
+                return await self.async_step_pair_companion()
+
+        # Scan network for Apple TVs
+        loop = asyncio.get_running_loop()
+        try:
+            configs = await pyatv.scan(loop, timeout=5)
+        except Exception:
+            _LOGGER.exception("Network scan failed")
+            return self.async_abort(reason="cannot_connect")
+
+        # Filter for devices that have Companion protocol (= Apple TVs)
+        self._discovered = {}
+        for config in configs:
+            has_companion = any(
+                s.protocol == Protocol.Companion for s in config.services
+            )
+            if has_companion:
+                self._discovered[config.identifier] = config
+
+        if not self._discovered:
+            return self.async_abort(reason="no_apple_tv")
+
+        # Build selection list
+        options = {
+            identifier: config.name
+            for identifier, config in self._discovered.items()
+        }
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required(CONF_ATV_HOST): str,
+                vol.Required("apple_tv"): vol.In(options),
             }),
             errors=errors,
         )
@@ -95,12 +116,11 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 return await self.async_step_pair_airplay()
 
-        # Start Companion pairing
         if self._pairing is None:
             loop = asyncio.get_running_loop()
             try:
                 self._pairing = await pyatv.pair(
-                    self._atv_config, Protocol.Companion, loop
+                    self._selected_config, Protocol.Companion, loop
                 )
                 await self._pairing.begin()
             except Exception:
@@ -140,19 +160,18 @@ class AirplaySpeakersConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title=f"AirPlay Speakers ({self._atv_name})",
                     data={
-                        CONF_ATV_HOST: self._host,
+                        CONF_ATV_IDENTIFIER: self._atv_identifier,
                         CONF_ATV_NAME: self._atv_name,
                         CONF_COMPANION_CREDENTIALS: self._companion_creds,
                         CONF_AIRPLAY_CREDENTIALS: airplay_creds,
                     },
                 )
 
-        # Start AirPlay pairing
         if self._pairing is None:
             loop = asyncio.get_running_loop()
             try:
                 self._pairing = await pyatv.pair(
-                    self._atv_config, Protocol.AirPlay, loop
+                    self._selected_config, Protocol.AirPlay, loop
                 )
                 await self._pairing.begin()
             except Exception:

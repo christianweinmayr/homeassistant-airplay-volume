@@ -14,7 +14,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
     CONF_AIRPLAY_CREDENTIALS,
-    CONF_ATV_HOST,
+    CONF_ATV_IDENTIFIER,
     CONF_COMPANION_CREDENTIALS,
     DOMAIN,
 )
@@ -27,22 +27,30 @@ PLATFORMS = ["media_player"]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AirPlay Speakers from a config entry."""
-    host = entry.data[CONF_ATV_HOST]
+    identifier = entry.data[CONF_ATV_IDENTIFIER]
     companion_creds = entry.data[CONF_COMPANION_CREDENTIALS]
     airplay_creds = entry.data[CONF_AIRPLAY_CREDENTIALS]
 
     loop = asyncio.get_running_loop()
 
-    _LOGGER.debug("Scanning for Apple TV at %s", host)
+    # Scan network to find the Apple TV by its unique identifier
+    _LOGGER.debug("Scanning network for Apple TV %s", identifier)
     try:
-        configs = await pyatv.scan(loop, hosts=[host], timeout=5)
+        configs = await pyatv.scan(loop, timeout=5)
     except Exception as err:
-        raise ConfigEntryNotReady(f"Failed to scan for Apple TV at {host}: {err}") from err
+        raise ConfigEntryNotReady(f"Network scan failed: {err}") from err
 
-    if not configs:
-        raise ConfigEntryNotReady(f"Apple TV not found at {host}")
+    config = None
+    for c in configs:
+        if c.identifier == identifier:
+            config = c
+            break
 
-    config = configs[0]
+    if config is None:
+        raise ConfigEntryNotReady(
+            f"Apple TV {entry.title} not found on network"
+        )
+
     config.set_credentials(Protocol.Companion, companion_creds)
     config.set_credentials(Protocol.AirPlay, airplay_creds)
 
